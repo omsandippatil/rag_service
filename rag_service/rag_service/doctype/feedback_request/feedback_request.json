@@ -12,6 +12,7 @@
   "language",
   "assignment_id",
   "submission_id",
+  "eval_type",
   "submission_type",
   "submission_url",
   "submission_text",
@@ -221,11 +222,18 @@
    "fieldtype": "Long Text",
    "label": "Kaapi Context",
    "description": "JSON captured at submit time (expected_format, model_used, template_used) so the webhook can finalize feedback without re-deriving it"
+  },
+  {
+   "default": "feedback",
+   "fieldname": "eval_type",
+   "fieldtype": "Select",
+   "label": "Eval Type",
+   "options": "feedback\nrubric"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-28 16:05:15.339783",
+ "modified": "2026-11-01 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Rag Service",
  "name": "Feedback Request",

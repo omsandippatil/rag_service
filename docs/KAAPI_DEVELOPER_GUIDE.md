@@ -117,12 +117,13 @@ def run_nightly_batch(...):          # dispatcher
 Resumable: submitted rows leave the `Pending` set; a re-run continues cleanly.
 
 Each outgoing assessment attempt is saved in **Kaapi Webhook Log** before the HTTP
-request. Filter **Direction = Outgoing** and open **Raw Body** for the complete JSON:
+request. Open **Request Body** for the complete JSON:
 config, all input rows (rendered prompts and image URLs), callback URL, and request
 metadata. The sent payload is unchanged and contains no webhook secret.
 The log changes from `Submitting` to `Submitted` (with Assessment ID and response data)
-or `Error`. Payloads remain saved on HTTP failures. Incoming callbacks create separate
-`Incoming` entries, correlated by Assessment ID. Run `bench --site <site> migrate`
+or `Error`. Payloads remain saved on HTTP failures. The incoming callback is saved on the
+same record (matched by Assessment ID) in the **Callback** section and **Callback Body**;
+a callback with no matching record gets its own record. Run `bench --site <site> migrate`
 before using these fields.
 
 ---

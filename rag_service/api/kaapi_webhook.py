@@ -3,9 +3,8 @@
 Kaapi ASSESSMENT webhook receiver — the RECEIVE side of the two-phase grading flow.
 
 Kaapi grades a submitted batch (see core/kaapi_assessment.py) and POSTs the results
-here. This endpoint correlates each result back to its Feedback Request and runs the
-SAME post-processing as the real-time path (finalize_feedback -> process_feedback ->
-deliver to the LMS queue).
+here. This endpoint correlates each result back to its Feedback Request and delivers
+the graded output, as Kaapi returns it, to the LMS queue (process_feedback).
 
 Endpoint (whitelisted, guest-callable so Kaapi can reach it):
     POST /api/method/rag_service.api.kaapi_webhook.receive
@@ -102,18 +101,15 @@ def _extract(payload: Dict) -> Tuple[Optional[str], List[Dict], Optional[int], O
     return assessment_id, items, total_items, status
 
 
-def _finalize_and_deliver(fs, gen, fr_name: str, assessment: Dict, webhook_ctx: Dict) -> None:
-    """Run the shared post-processing on one graded item and deliver it to the LMS."""
-    expected_format = webhook_ctx.get("expected_format") or {}
+def _finalize_and_deliver(fs, fr_name: str, assessment: Dict, webhook_ctx: Dict) -> None:
+    """Deliver one graded item to the LMS. The Kaapi config's output schema defines its
+    fields: overall_feedback, overall_feedback_translated, submission_validity for
+    feedback; rubric_evaluations, final_grade, submission_validity for rubric."""
     model_used = webhook_ctx.get("model_used") or "Kaapi"
     template_used = webhook_ctx.get("template_used") or "Kaapi Assessment"
-
-    # finalize_feedback parses a raw JSON string; the ASSESSMENT API gives no per-item
-    # cost/logprob, so those markers are 0.
-    raw_text = json.dumps(assessment)
-    feedback = gen.finalize_feedback(raw_text, expected_format, cost=0.0, log_prob=None)
-
-    asyncio.run(fs.process_feedback(fr_name, feedback, model_used, template_used))
+    language = frappe.db.get_value("Feedback Request", fr_name, "language")
+    assessment["translation_language"] = "Hindi" if language == "Hinglish" else language
+    asyncio.run(fs.process_feedback(fr_name, assessment, model_used, template_used))
     frappe.db.set_value("Feedback Request", fr_name, {"kaapi_status": "Completed"})
     frappe.db.commit()
 
@@ -125,7 +121,7 @@ _SECRET_HEADERS = {
 
 
 def _log_request() -> Optional[str]:
-    """Save the incoming callback as a Kaapi Webhook Log BEFORE any processing, and
+    """Save the incoming callback on its Kaapi Webhook Log (or a new one if none matches) BEFORE any processing, and
     commit it straight away so later rollbacks in process_payload can't discard it.
     Sensitive headers and any unexpected token query parameter are redacted. Never raises."""
     try:
@@ -144,22 +140,28 @@ def _log_request() -> Optional[str]:
         except Exception:
             pass  # not JSON / unexpected shape — the raw body is still saved
 
-        log = frappe.get_doc({
-            "doctype": "Kaapi Webhook Log",
-            "direction": "Incoming",
-            "received_at": frappe.utils.now_datetime(),
-            "assessment_id": assessment_id,
+        fields = {
+            "callback_received_at": frappe.utils.now_datetime(),
+            "processing_status": "Received",
             "callback_status": status,
             "remote_ip": frappe.local.request_ip,
             "content_type": req.content_type,
             "query_params": json.dumps(query, indent=2),
             "headers": json.dumps(headers, indent=2),
-            "raw_body": raw,
-        })
-        log.insert(ignore_permissions=True)
+            "callback_body": raw,
+        }
+        # The callback completes the record created when the batch was submitted.
+        log_name = assessment_id and frappe.db.get_value(
+            "Kaapi Webhook Log", {"assessment_id": assessment_id})
+        if log_name:
+            frappe.db.set_value("Kaapi Webhook Log", log_name, fields)
+        else:
+            log_name = frappe.get_doc({
+                "doctype": "Kaapi Webhook Log", "assessment_id": assessment_id, **fields,
+            }).insert(ignore_permissions=True).name
         frappe.db.commit()
-        enqueue_raw_body_upload(log.name)
-        return log.name
+        enqueue_raw_body_upload(log_name, "callback_body")
+        return log_name
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(f"Could not save Kaapi Webhook Log: {e}", "Kaapi Webhook Log Error")
@@ -271,10 +273,8 @@ def process_payload(payload: Dict, log_name: Optional[str] = None) -> Dict:
             )
 
         from ..core.feedback_service import FeedbackService
-        from ..feedback_utils.evaluation_generation import EvaluationGenerator
 
         fs = FeedbackService()
-        gen = EvaluationGenerator(fs)
 
         summary = {"completed": 0, "failed": 0, "skipped": 0, "unmatched": 0}
 
@@ -306,15 +306,11 @@ def process_payload(payload: Dict, log_name: Optional[str] = None) -> Dict:
                 webhook_ctx = {}
 
             try:
-                _finalize_and_deliver(fs, gen, row.name, assessment, webhook_ctx)
+                _finalize_and_deliver(fs, row.name, assessment, webhook_ctx)
                 summary["completed"] += 1
             except Exception as e:
                 frappe.db.rollback()
-                frappe.db.set_value(
-                    "Feedback Request", row.name,
-                    {"status": "Failed", "kaapi_status": "Failed", "error_log": str(e)[:1000]},
-                )
-                frappe.db.commit()
+                fs.fail_request(row.name, str(e), kaapi_status="Failed")
                 summary["failed"] += 1
                 frappe.log_error(
                     f"Kaapi webhook finalize failed for {row.name}: {e}",
@@ -328,13 +324,11 @@ def process_payload(payload: Dict, log_name: Optional[str] = None) -> Dict:
         full_batch = (total_items is None) or (len(items) >= total_items)
         if terminal and full_batch:
             for name in list(expected.keys()):
-                frappe.db.set_value(
-                    "Feedback Request", name,
-                    {"status": "Failed", "kaapi_status": "Failed",
-                     "error_log": f"No successful Kaapi result for this row "
-                                  f"(batch {assessment_id}, status {status})"[:1000]},
+                fs.fail_request(
+                    name,
+                    f"No successful Kaapi result for this row (batch {assessment_id}, status {status})",
+                    kaapi_status="Failed",
                 )
-                frappe.db.commit()
                 summary["failed"] += 1
 
         frappe.logger().info(f"Kaapi webhook {assessment_id} processed: {summary}")

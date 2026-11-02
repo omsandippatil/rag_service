@@ -36,6 +36,18 @@ class FeedbackHandler:
         submission_data = normalize_submission_payload(message_data)
         submission_type = (submission_data.get("submission_type") or "").lower()
 
+        # Text and emoji submissions are not graded: reply with stock feedback straight away.
+        if submission_type in ("text", "emoji"):
+            request_id = await self.create_feedback_request(message_data, submission_data)
+            language = "Hindi" if message_data["language"] == "Hinglish" else message_data["language"]
+            await self.feedback_service.process_feedback(
+                request_id,
+                self.feedback_service.create_text_submission_feedback(language),
+                "N/A",
+                "Stock Feedback for Text Submission",
+            )
+            return
+
         # Batch mode: image/text/video are DEFERRED — save a Pending record and stop
         # (the nightly batch grades them). Audio keeps processing in real time.
         if batch_mode_enabled() and submission_type in DEFERRED_SUBMISSION_TYPES:
@@ -84,30 +96,12 @@ class FeedbackHandler:
             # Mark request as failed if it exists
             if request_id and frappe.db.exists("Feedback Request", request_id):
                 await self.mark_request_failed(request_id, str(e))
-            template_used = "Built-in Universal Template for Error"
-            feedback = self.feedback_service.create_error_feedback(str(e))
-            feedback = self._attach_plagiarism_defaults(feedback)
-            feedback['strengths'] = ["cost:1", f"Feedback_LP:0.89", f"Eval_LP:0.78"]
-            model_used = "N/A"
+            # The consumer sends the Failed message to TAP LMS.
             raise Exception(error_msg)
-        finally:
-            print("\nFeedback generated, processing feedback...")
-            # Process and deliver feedback
-            await self.feedback_service.process_feedback(request_id, feedback, model_used, template_used)
-            print("\nFeedback processing completed")
 
-    def _attach_plagiarism_defaults(self, feedback: Dict) -> Dict:
-        feedback["plagiarism_output"] = {
-            "is_plagiarized": False,
-            "is_ai_generated": False,
-            "match_type": "original",
-            "plagiarism_source": "none",
-            "similarity_score": 0.0,
-            "ai_detection_source": "none",
-            "ai_confidence": 0.0,
-            "similar_sources": [],
-        }
-        return feedback
+        print("\nFeedback generated, processing feedback...")
+        await self.feedback_service.process_feedback(request_id, feedback, model_used, template_used)
+        print("\nFeedback processing completed")
 
 
     async def create_feedback_request(self, message_data: Dict, submission_data: Dict,
@@ -121,7 +115,8 @@ class FeedbackHandler:
             existing_requests = frappe.get_list(
                 "Feedback Request",
                 filters={
-                    "submission_id": message_data["submission_id"]
+                    "submission_id": message_data["submission_id"],
+                    "eval_type": message_data.get("eval_type") or "feedback",
                 }
             )
             
@@ -150,6 +145,7 @@ class FeedbackHandler:
                     "submission_id": message_data["submission_id"],
                     "student_id": message_data["student_id"],
                     "assignment_id": message_data["assignment_id"],
+                    "eval_type": message_data.get("eval_type") or "feedback",
                     "grade": message_data.get("grade"),
                     "level": message_data.get("level"),
                     "language": message_data.get("language"),

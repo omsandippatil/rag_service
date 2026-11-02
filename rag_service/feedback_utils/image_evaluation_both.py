@@ -76,11 +76,7 @@ class ImageEvaluationGenerator(EvaluationGenerator):
             print(f"\nError: {error_msg}")
             frappe.log_error(message=error_msg, title="Image Feedback Generation Error")
 
-            template_used = "Built-in Universal Template for Error"
-            error_feedback = self.feedback_service.create_error_feedback(error_detail)
-            error_feedback = self._attach_plagiarism_defaults(error_feedback)
-            error_feedback['strengths'] = ["cost:1", f"Feedback_LP:0.89", f"Eval_LP:0.78"]
-            return error_feedback, "N/A", template_used
+            raise
         finally:
             if media_service:
                 media_service.cleanup(media_asset)

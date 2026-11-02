@@ -30,6 +30,7 @@ def normalize_submission_payload(message_data: Dict) -> Dict:
         "archetype": message_data.get("archetype"),
         "current_week": message_data.get("current_week"),
         "escalation_step_at_submit": message_data.get("escalation_step_at_submit"),
+        "eval_type": message_data.get("eval_type"),
     }
 
 

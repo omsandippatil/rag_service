@@ -1,11 +1,11 @@
 {
-    "name": "Tap video assessment",
-    "description": "assessment test with private videos",
+    "name": "Tap image rubric assessment",
+    "description": "Rubric assessment for image. Not meant for feedback, but intended for internal evaluations.",
     "tag": "ASSESSMENT",
     "config_blob": {
         "input_schema": {
-                "artwork_video": {
-                    "type": "video",
+                "artwork_image": {
+                    "type": "image",
                     "format": "url"
                 },
                 "submission_id": {
@@ -20,16 +20,14 @@
         "assessment": {
                 "type": "text",
                 "params": {
-                    "model": "gemini-3.5-flash-lite",
-                    "submission": "{rendered_prompt}\n\nReturn submission_id exactly as: {submission_id}",
-                    "instructions": "Execute the grading prompt provided in the submission against the attached video. Follow that prompt's rubric and scoring exactly. Copy the given submission_id verbatim into the submission_id output field. Return output strictly matching the JSON schema.",
+                    "model": "claude-opus-5-5",
+                    "submission": "{rendered_prompt}",
+                    "instructions": "Execute the grading prompt provided in the submission against the attached image. Follow that prompt's rubric and scoring exactly. Return output strictly matching the JSON schema.",
                     "json_output_schema": {
                         "type": "object",
                         "required": [
                             "submission_id",
                             "rubric_evaluations",
-                            "overall_feedback",
-                            "overall_feedback_translated",
                             "final_grade",
                             "submission_validity"
                         ],
@@ -41,10 +39,6 @@
                             "submission_id": {
                                 "type": "string",
                                 "description": "echo the input submission_id exactly as given"
-                            },
-                            "overall_feedback": {
-                                "type": "string",
-                                "description": "encouraging overall feedback"
                             },
                             "rubric_evaluations": {
                                 "type": "array",
@@ -62,7 +56,7 @@
                                         },
                                         "grade_value": {
                                             "type": "integer",
-                                            "description": "1-5 grade for this skill"
+                                            "description": "1-5 grade for this skill. -1 for invalid"
                                         },
                                         "observation": {
                                             "type": "string",
@@ -76,16 +70,12 @@
                             "submission_validity": {
                                 "type": "string",
                                 "description": "validity of the submission, one of: valid or invalid"
-                            },
-                            "overall_feedback_translated": {
-                                "type": "string",
-                                "description": "overall feedback in the student's language as specified in the prompt"
                             }
                         },
                         "additionalProperties": false
                     }
                 },
-                "provider": "openai"
+                "provider": "anthropic"
             }
     }
 }

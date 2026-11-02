@@ -72,6 +72,7 @@ def _message_from_request(fr) -> Dict:
         "ai_confidence": fr.ai_confidence,
         "ai_detection_source": fr.ai_detection_source,
         "similar_sources": similar,
+        "eval_type": fr.eval_type,
     }
 
 
@@ -117,11 +118,8 @@ def _grade_in_thread(site: str, fr_name: str) -> str:
     except Exception as e:
         frappe.log_error(f"Nightly batch failed for {fr_name}: {e}", "Nightly Batch Error")
         try:
-            frappe.db.set_value(
-                "Feedback Request", fr_name,
-                {"status": "Failed", "error_log": str(e)[:1000]},
-            )
-            frappe.db.commit()
+            from .feedback_service import FeedbackService
+            FeedbackService().fail_request(fr_name, str(e))
         except Exception:
             pass
         return "failed"
@@ -167,7 +165,7 @@ async def _prepare_page(page: List[str]) -> Dict:
     - Flagged rows are delivered canned right here (no Kaapi).
     - Clean rows are rendered (build_eval_request) and bucketed by media type.
 
-    Returns {"image": [items], "text": [items], "video": [items], "flagged": n, "failed": n} where each
+    Returns {"buckets": {(kind, eval_type): [items]}, "flagged": n, "failed": n} where each
     item is (fr_name, row, webhook_context). Row order within a bucket is preserved and
     becomes the batch index.
     """
@@ -180,15 +178,15 @@ async def _prepare_page(page: List[str]) -> Dict:
     from .kaapi_assessment import KaapiAssessmentClient
 
     fs = FeedbackService()
-    buckets: Dict = {"image": [], "text": [], "video": [], "flagged": 0, "failed": 0}
+    buckets: Dict = {"buckets": {}, "flagged": 0, "failed": 0}
 
     for fr_name in page:
         fr = frappe.get_doc("Feedback Request", fr_name)
         message = _message_from_request(fr)
 
-        # 1) plagiarism / AI gating — deliver canned, skip Kaapi
+        # 1) plagiarism / AI gating — deliver canned, skip Kaapi (never for rubric re-evaluations)
         try:
-            if await _deliver_flagged(fs, fr_name, message):
+            if fr.eval_type != "rubric" and await _deliver_flagged(fs, fr_name, message):
                 buckets["flagged"] += 1
                 continue
         except Exception as e:
@@ -222,34 +220,27 @@ async def _prepare_page(page: List[str]) -> Dict:
             buckets["failed"] += 1
             continue
 
-        webhook_ctx = {
-            "expected_format": req["expected_format"],
-            "model_used": req["model_used"],
-            "template_used": req["template_used"],
-        }
-        buckets[kind].append((fr_name, row, webhook_ctx))
+        webhook_ctx = {"template_used": req["template_used"]}
+        buckets["buckets"].setdefault((kind, fr.eval_type), []).append((fr_name, row, webhook_ctx))
 
     return buckets
 
 
 def _mark_failed(fr_name: str, error: str) -> None:
+    from .feedback_service import FeedbackService
     try:
-        frappe.db.set_value(
-            "Feedback Request", fr_name,
-            {"status": "Failed", "kaapi_status": "Failed", "error_log": str(error)[:1000]},
-        )
-        frappe.db.commit()
+        FeedbackService().fail_request(fr_name, error, kaapi_status="Failed")
     except Exception:
         frappe.db.rollback()
 
 
-def _submit_bucket(client, kind: str, items: List) -> int:
-    """Submit one media bucket to Kaapi and record correlation state on each row."""
-    if not items:
-        return 0
+def _submit_bucket(client, kind: str, eval_type: str, items: List) -> int:
+    """Submit one media + eval type bucket to Kaapi and record correlation state on each row."""
+    config = client.config_for(kind, eval_type)
     rows = [row for (_fr, row, _ctx) in items]
-    assessment_id = client.submit(rows, kind, request_metadata={"kind": kind})
+    assessment_id = client.submit(rows, config, request_metadata={"kind": kind, "eval_type": eval_type})
     for index, (fr_name, _row, webhook_ctx) in enumerate(items):
+        webhook_ctx["model_used"] = config.model
         frappe.db.set_value(
             "Feedback Request", fr_name,
             {
@@ -262,7 +253,7 @@ def _submit_bucket(client, kind: str, items: List) -> int:
         )
     frappe.db.commit()
     frappe.logger().info(
-        f"Nightly submit: {kind} batch {assessment_id} -> {len(items)} rows"
+        f"Nightly submit: {kind}/{eval_type} batch {assessment_id} -> {len(items)} rows"
     )
     return len(items)
 
@@ -289,12 +280,12 @@ def run_submit_phase(page_size: int = 100, max_items: int = 0) -> Dict:
         buckets = asyncio.run(_prepare_page(fresh))
         summary["flagged"] += buckets["flagged"]
         summary["failed"] += buckets["failed"]
-        for kind in ("image", "text", "video"):
+        for (kind, eval_type), items in buckets["buckets"].items():
             try:
-                summary["submitted"] += _submit_bucket(client, kind, buckets[kind])
+                summary["submitted"] += _submit_bucket(client, kind, eval_type, items)
             except Exception as e:
                 # Whole-batch submit failure: leave those rows Pending for the next run.
-                frappe.log_error(f"Kaapi submit failed ({kind}): {e}", "Nightly Submit Error")
+                frappe.log_error(f"Kaapi submit failed ({kind}/{eval_type}): {e}", "Nightly Submit Error")
         summary["total"] += len(fresh)
 
         frappe.logger().info(f"Nightly submit progress: {summary}")

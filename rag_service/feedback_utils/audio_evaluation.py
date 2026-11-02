@@ -21,10 +21,10 @@ class AudioEvaluationGenerator(EvaluationGenerator):
             print("\n=== Starting AI Feedback Generation (Audio) ===")
 
             llm_provider, model_used = self._create_llm_provider("Gemini")
-            activity_type = assignment_context["assignment"].get("activity_type")
             course_vertical = assignment_context["assignment"].get("course_vertical")
 
-            template = self.get_prompt_template("audio", "both", activity_type, course_vertical)
+            prompt_type = "rubric" if submission_data.get("eval_type") == "rubric" else "both"
+            template = self.get_prompt_template("audio", prompt_type, course_vertical)
             expected_format = self._get_expected_format(template)
             system_prompt, formatted_user_prompt = self._format_prompts(
                 template,
@@ -64,10 +64,7 @@ class AudioEvaluationGenerator(EvaluationGenerator):
             )
             print(f"\nError: {error_msg}")
             frappe.log_error(message=error_msg, title="Audio Feedback Generation Error")
-            error_feedback = self.feedback_service.create_error_feedback(error_detail)
-            error_feedback = self._attach_plagiarism_defaults(error_feedback)
-            error_feedback["strengths"] = ["cost:1", "Feedback_LP:0.89", "Eval_LP:0.78"]
-            return error_feedback, "N/A", "Built-in Universal Template for Error"
+            raise
         finally:
             if media_service:
                 media_service.cleanup(media_asset)

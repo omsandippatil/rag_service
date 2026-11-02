@@ -48,7 +48,4 @@ class TextEvaluationGenerator(EvaluationGenerator):
             )
             print(f"\nError: {error_msg}")
             frappe.log_error(message=error_msg, title="Text Feedback Generation Error")
-            error_feedback = self.feedback_service.create_error_feedback(error_detail)
-            error_feedback = self._attach_plagiarism_defaults(error_feedback)
-            error_feedback["strengths"] = ["cost:0", "Feedback_LP:0.0", "Eval_LP:0.0"]
-            return error_feedback, "N/A", "Built-in Universal Template for Error"
+            raise

@@ -13,12 +13,7 @@
   "webhook_secret",
   "allow_insecure_webhook",
   "configs_section",
-  "image_config_id",
-  "image_config_version",
-  "text_config_id",
-  "text_config_version",
-  "video_config_id",
-  "video_config_version"
+  "configs"
  ],
  "fields": [
   {
@@ -76,48 +71,21 @@
    "label": "Allow Insecure Webhook"
   },
   {
-   "description": "Configure each media type you grade. Text also covers emoji submissions. Model and provider are configured in Kaapi.",
+   "description": "One row per media type and eval type. Text also covers emoji submissions. Model and Config Definition are fetched from Kaapi when a row is saved.",
    "fieldname": "configs_section",
    "fieldtype": "Section Break",
    "label": "Assessment Configs"
   },
   {
-   "fieldname": "image_config_id",
-   "fieldtype": "Data",
-   "label": "Image Config ID"
-  },
-  {
-   "default": "1",
-   "fieldname": "image_config_version",
-   "fieldtype": "Int",
-   "label": "Image Config Version"
-  },
-  {
-   "fieldname": "text_config_id",
-   "fieldtype": "Data",
-   "label": "Text Config ID"
-  },
-  {
-   "default": "1",
-   "fieldname": "text_config_version",
-   "fieldtype": "Int",
-   "label": "Text Config Version"
-  },
-  {
-   "fieldname": "video_config_id",
-   "fieldtype": "Data",
-   "label": "Video Config ID"
-  },
-  {
-   "default": "1",
-   "fieldname": "video_config_version",
-   "fieldtype": "Int",
-   "label": "Video Config Version"
+   "fieldname": "configs",
+   "fieldtype": "Table",
+   "label": "Configs",
+   "options": "Kaapi Config"
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-10-15 00:00:00.000000",
+ "modified": "2026-11-01 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Rag Service",
  "name": "Kaapi Settings",

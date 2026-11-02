@@ -1,9 +1,11 @@
 # Copyright (c) 2026, TAP and contributors
 # For license information, please see license.txt
 
+import json
 from urllib.parse import parse_qsl, urlsplit
 
 import frappe
+import requests
 from frappe.model.document import Document
 
 
@@ -19,6 +21,16 @@ def assessments_enabled() -> bool:
     return bool(get_kaapi_settings().enable_assessments)
 
 
+def kaapi_headers(api_key: str) -> dict:
+    key = api_key.strip()
+    value = key if key.lower().startswith("apikey ") else f"ApiKey {key}"
+    return {
+        "X-API-KEY": value,
+        "accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+
 class KaapiSettings(Document):
     def validate(self):
         self.base_url = (self.base_url or DEFAULT_BASE_URL).strip().rstrip("/")
@@ -32,18 +44,18 @@ class KaapiSettings(Document):
             if any(key == "token" for key, _ in parse_qsl(urlsplit(self.callback_url).query)):
                 frappe.throw("Enter Callback URL without a token; Kaapi authenticates with HMAC headers.")
 
-        for kind in ("image", "text", "video"):
-            self.set(f"{kind}_config_id", (self.get(f"{kind}_config_id") or "").strip())
-            field = f"{kind}_config_version"
-            version = self.get(field)
-            if version in (None, ""):
-                version = 1
-            try:
-                if int(version) < 1 or float(version) != int(version):
-                    raise ValueError
-            except (TypeError, ValueError, OverflowError):
-                frappe.throw(f"{kind.title()} Config Version must be a positive integer.")
-            self.set(field, int(version))
+        before = self.get_doc_before_save()
+        saved = {row.name: (row.config_id, row.version) for row in (before.configs if before else [])}
+        seen = set()
+        for row in self.configs:
+            row.config_id = row.config_id.strip()
+            if row.version < 1:
+                frappe.throw(f"Row {row.idx}: Version must be a positive integer.")
+            if (row.media_type, row.eval_type) in seen:
+                frappe.throw(f"Row {row.idx}: {row.media_type} / {row.eval_type} is configured twice.")
+            seen.add((row.media_type, row.eval_type))
+            if saved.get(row.name) != (row.config_id, row.version):
+                self._fetch_config(row)
 
         if self.enable_assessments:
             if not self.get_secret("api_key"):
@@ -52,8 +64,18 @@ class KaapiSettings(Document):
                 frappe.throw("Callback URL is required to enable Kaapi assessments.")
             if not self.allow_insecure_webhook and not self.get_secret("webhook_secret"):
                 frappe.throw("Webhook Secret is required to enable Kaapi assessments.")
-            if not (self.image_config_id or self.text_config_id or self.video_config_id):
-                frappe.throw("Configure at least one Image, Text or Video Config ID for Kaapi assessments.")
+            if not self.configs:
+                frappe.throw("Add at least one Config row for Kaapi assessments.")
+
+    def _fetch_config(self, row):
+        """Store the config definition and its model on the row."""
+        url = f"{self.base_url}/api/v1/configs/{row.config_id}/versions/{row.version}"
+        response = requests.get(url, headers=kaapi_headers(self.get_secret("api_key")), timeout=60)
+        if not response.ok:
+            frappe.throw(f"Row {row.idx}: fetching {url} failed {response.status_code}: {response.text[:400]}")
+        data = response.json()["data"]
+        row.config_definition = json.dumps(data, indent=2)
+        row.model = data["config_blob"]["assessment"]["params"]["model"]
 
     @staticmethod
     def _validate_url(value, label, allow_query=True):

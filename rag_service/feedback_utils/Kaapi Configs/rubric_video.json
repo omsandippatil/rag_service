@@ -1,0 +1,81 @@
+{
+    "name": "Tap video rubric assessment",
+    "description": "Rubric assessment for video. Not meant for feedback, but intended for internal evaluations.",
+    "tag": "ASSESSMENT",
+    "config_blob": {
+        "input_schema": {
+                "artwork_video": {
+                    "type": "video",
+                    "format": "url"
+                },
+                "submission_id": {
+                    "type": "text",
+                    "format": null
+                },
+                "rendered_prompt": {
+                    "type": "text",
+                    "format": null
+                }
+            },
+        "assessment": {
+                "type": "text",
+                "params": {
+                    "model": "gemini-3.5-flash-lite",
+                    "submission": "{rendered_prompt}",
+                    "instructions": "Execute the grading prompt provided in the submission against the attached video. Follow that prompt's rubric and scoring exactly. Return output strictly matching the JSON schema.",
+                    "json_output_schema": {
+                        "type": "object",
+                        "required": [
+                            "submission_id",
+                            "rubric_evaluations",
+                            "final_grade",
+                            "submission_validity"
+                        ],
+                        "properties": {
+                            "final_grade": {
+                                "type": "integer",
+                                "description": "0-100 overall grade"
+                            },
+                            "submission_id": {
+                                "type": "string",
+                                "description": "echo the input submission_id exactly as given"
+                            },
+                            "rubric_evaluations": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "Skill",
+                                        "grade_value",
+                                        "observation"
+                                    ],
+                                    "properties": {
+                                        "Skill": {
+                                            "type": "string",
+                                            "description": "the rubric skill name"
+                                        },
+                                        "grade_value": {
+                                            "type": "integer",
+                                            "description": "1-5 grade for this skill. -1 for invalid"
+                                        },
+                                        "observation": {
+                                            "type": "string",
+                                            "description": "evidence-based reason"
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "description": "one entry per rubric skill named in the prompt"
+                            },
+                            "submission_validity": {
+                                "type": "string",
+                                "description": "validity of the submission, one of: valid or invalid"
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "provider": "google-gcp"
+            }
+    }
+}

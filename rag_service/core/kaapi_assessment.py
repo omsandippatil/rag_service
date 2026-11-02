@@ -21,13 +21,13 @@ Configuration and encrypted credentials come from the site's Kaapi Settings sing
 No environment variables or LLM Settings record are required for assessments.
 """
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import frappe
 import requests
 
-from ..rag_service.doctype.kaapi_settings.kaapi_settings import DEFAULT_BASE_URL, get_kaapi_settings
+from ..rag_service.doctype.kaapi_settings.kaapi_settings import DEFAULT_BASE_URL, get_kaapi_settings, kaapi_headers
 from .kaapi_log_archive import enqueue_raw_body_upload
 
 API_PREFIX = "/api/v1"
@@ -45,11 +45,16 @@ class KaapiAssessmentClient:
         self.callback_url = self.settings.get_callback_url()
 
     # ---- config lookup ----
-    def _config_for(self, media_type: str) -> Tuple[Optional[str], int]:
+    def config_for(self, media_type: str, eval_type: str):
+        """The Kaapi Config row for this media type and eval type."""
         kind = media_type if media_type in ("text", "video") else "image"
-        config_id = (self.settings.get(f"{kind}_config_id") or "").strip() or None
-        version = int(self.settings.get(f"{kind}_config_version") or 1)
-        return config_id, version
+        for row in self.settings.configs:
+            if row.media_type == kind and row.eval_type == eval_type:
+                return row
+        raise ValueError(
+            f"No Kaapi config configured for media_type={kind}, eval_type={eval_type} "
+            f"(add a row to Configs in Kaapi Settings)"
+        )
 
     # ---- http ----
     @staticmethod
@@ -60,13 +65,7 @@ class KaapiAssessmentClient:
         return url
 
     def _headers(self) -> Dict:
-        key = self.api_key.strip()
-        value = key if key.lower().startswith("apikey ") else f"ApiKey {key}"
-        return {
-            "X-API-KEY": value,
-            "accept": "application/json",
-            "Content-Type": "application/json",
-        }
+        return kaapi_headers(self.api_key)
 
     def _unwrap(self, body: Dict) -> Dict:
         if isinstance(body, dict) and "success" in body and "data" in body:
@@ -86,7 +85,7 @@ class KaapiAssessmentClient:
             raise Exception(f"Kaapi POST {path} -> {r.status_code}: {r.text[:400]}")
         return self._unwrap(r.json())
 
-    def _log_submission(self, body: Dict) -> str:
+    def _log_submission(self, body: Dict, media_type: str) -> str:
         """Persist the whole batch before sending it, with the callback token redacted."""
         callback = urlsplit(body["callback_url"])
         query = [(key, "***" if key == "token" else value)
@@ -97,11 +96,11 @@ class KaapiAssessmentClient:
         }
         log = frappe.get_doc({
             "doctype": "Kaapi Webhook Log",
-            "direction": "Outgoing",
             "received_at": frappe.utils.now_datetime(),
             "processing_status": "Submitting",
+            "media_type": media_type,
+            "request_count": len(body["input"]["data"]),
             "request_url": f"{self.base_url}{API_PREFIX}/assessments",
-            "content_type": "application/json",
             "raw_body": json.dumps(logged_body, indent=2, ensure_ascii=False),
         })
         log.insert(ignore_permissions=True)
@@ -175,22 +174,17 @@ class KaapiAssessmentClient:
             return None
         return "artwork_video" if media_type == "video" else "artwork_image"
 
-    def submit(self, rows: List[Dict], media_type: str,
+    def submit(self, rows: List[Dict], config,
                request_metadata: Optional[Dict] = None) -> str:
         """Submit one batch to Kaapi. Returns the batch `assessment_id`.
 
         `rows` must be in the order we want to correlate by — the row at index i
         becomes `input.data[i]` and its result comes back as `items[i]`.
+        `config` is the Kaapi Config row from config_for().
         """
         if not rows:
             raise ValueError("submit() called with no rows")
-        config_id, version = self._config_for(media_type)
-        if not config_id:
-            raise ValueError(
-                f"No Kaapi config configured for media_type={media_type} "
-                f"(set {media_type.title() if media_type in ('text', 'video') else 'Image'} "
-                f"Config ID in Kaapi Settings)"
-            )
+        media_type = config.media_type
 
         media_field = self._media_field(media_type)
         if media_field:
@@ -201,12 +195,12 @@ class KaapiAssessmentClient:
             ]
 
         body = {
-            "config": {"id": config_id, "version": version},
+            "config": {"id": config.config_id, "version": config.version},
             "input": {"data": rows},
             "callback_url": self.callback_url,
             "request_metadata": request_metadata or {},
         }
-        log_name = self._log_submission(body)
+        log_name = self._log_submission(body, media_type)
         try:
             data = self._post("/assessments", body)
             assessment_id = data.get("assessment_id")

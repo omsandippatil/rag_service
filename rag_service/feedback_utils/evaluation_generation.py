@@ -148,7 +148,7 @@ class EvaluationGenerator:
         return prompt
 
 
-    def get_prompt_template(self, media_type: str, prompt_type: str, activity_type: str, course_vertical: str):
+    def get_prompt_template(self, media_type: str, prompt_type: str, course_vertical: str):
         """Get active template for the given media type."""
         try:
             print(f"\n=== Getting Prompt Template for {prompt_type}===")
@@ -156,7 +156,6 @@ class EvaluationGenerator:
             print(f"Media Type: {media_type}")
             print(f"Course Vertical: {course_vertical}")
             print(f"prompt_type Type: {prompt_type}")
-            print(f"activity_type: {activity_type}")
 
 
 
@@ -168,7 +167,6 @@ class EvaluationGenerator:
                 "is_active": 1,
                 "media_type": media_type,
                 "prompt_type": prompt_type,
-                "activity_type": activity_type,
                 "course_vertical": template_course_vertical,
             }
             templates = frappe.get_list(
@@ -201,7 +199,7 @@ class EvaluationGenerator:
             frappe.log_error("Template Error", error_msg)
             raise Exception(
                 f"No active template found for media_type={media_type!r}, "
-                f"prompt_type={prompt_type!r}, activity_type={activity_type!r}, "
+                f"prompt_type={prompt_type!r}, "
                 f"course_vertical={course_vertical!r} "
                 f"(searched as {template_course_vertical!r}). Cause: {e}"
             )
@@ -358,8 +356,8 @@ class EvaluationGenerator:
         try:
             feedback = json.loads(cleaned_text)
             feedback = self.feedback_service.validate_feedback_structure(feedback, expected_format)
-        except json.JSONDecodeError:
-            feedback = self.feedback_service.create_error_feedback(raw_text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Model output is not valid JSON ({e}): {raw_text}") from e
 
         return feedback
 
@@ -429,13 +427,13 @@ class EvaluationGenerator:
             provider_name = self._eval_provider()
             llm_provider, model_used = self._create_llm_provider(provider_name)
 
-        activity_type = assignment_context["assignment"].get("activity_type")
         course_vertical = assignment_context["assignment"].get("course_vertical")
         if media_type == "text":
             # Preserve the existing text path's hard override.
             course_vertical = "Arts"
 
-        template = self.get_prompt_template(media_type, "both", activity_type, course_vertical)
+        prompt_type = "rubric" if submission_data.get("eval_type") == "rubric" else "both"
+        template = self.get_prompt_template(media_type, prompt_type, course_vertical)
         expected_format = self._get_expected_format(template)
         system_prompt, formatted_user_prompt = self._format_prompts(
             template,

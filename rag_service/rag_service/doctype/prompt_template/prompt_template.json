@@ -11,7 +11,6 @@
   "course_vertical",
   "media_type",
   "prompt_type",
-  "activity_type",
   "system_segment",
   "grading_segment",
   "subject_segment",
@@ -63,16 +62,8 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Prompt Type",
-   "options": "evaluation\nfeedback\nboth",
+   "options": "evaluation\nfeedback\nboth\nrubric",
    "reqd": 1
-  },
-  {
-    "fieldname": "activity_type",
-    "fieldtype": "Select",
-    "in_list_view": 1,
-    "label": "Activity Type",
-    "options": "Regular\nChallenge",
-    "reqd": 1
   },
   {
    "fieldname": "system_segment",
@@ -143,7 +134,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-03-24 17:12:26.522990",
+ "modified": "2026-11-01 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Rag Service",
  "name": "Prompt Template",
@@ -162,7 +153,7 @@
    "write": 1
   }
  ],
- "search_fields": "template_name,media_type,prompt_type,course_vertical,activity_type,category,tags",
+ "search_fields": "template_name,media_type,prompt_type,course_vertical,category,tags",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

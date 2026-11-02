@@ -239,6 +239,7 @@ class RabbitMQConsumer:
             "submission_id": source.get("submission_id"),
             "student_id": source.get("student_id"),
             "assignment_id": source.get("assignment_id"),
+            "eval_type": source.get("eval_type"),
             "status": "Failed",
             "failure_reason": reason,
             "failure_details": details,

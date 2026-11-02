@@ -27,9 +27,11 @@ class FeedbackService:
                 is_plagiarized = plagiarism_data.get("is_plagiarized", False)
                 is_ai_generated = plagiarism_data.get("is_ai_generated", False)
                 match_type = plagiarism_data.get("match_type", "original")
+                # Rubric re-evaluations are always graded, whatever PLG reports.
+                is_rubric = submission_data.get("eval_type") == "rubric"
 
                 # Handle AI-generated submissions
-                if is_ai_generated:
+                if is_ai_generated and not is_rubric:
                     result_status = "Success - Flagged"
                     feedback = self._create_ai_generated_feedback(
                         plagiarism_data
@@ -37,7 +39,7 @@ class FeedbackService:
                     tempalate_used = "Feedback Template for AI Generated Submission"
 
                 # Handle plagiarized submissions
-                elif is_plagiarized:
+                elif is_plagiarized and not is_rubric:
                     result_status = "Success - Flagged"
                     feedback = self._create_plagiarism_feedback(
                         plagiarism_data
@@ -61,7 +63,7 @@ class FeedbackService:
             raise
 
     async def process_feedback(
-        self, request_id: str, feedback: Dict, model_used: str, template_used: str
+        self, request_id: str, feedback: Dict, model_used: str, template_used: str,
     ) -> None:
         """Process and store feedback in Feedback Request DocType."""
         try:
@@ -75,7 +77,7 @@ class FeedbackService:
                 update_modified=True,
             )
             feedback_request.db_set(
-                "feedback_summary", feedback["overall_feedback"], update_modified=True
+                "feedback_summary", feedback.get("overall_feedback"), update_modified=True
             )
             feedback_request.db_set("completed_at", datetime.now(), update_modified=True)
             feedback_request.db_set("model_used", model_used, update_modified=True)
@@ -92,6 +94,8 @@ class FeedbackService:
                 "student_id": feedback_request.student_id,
                 "assignment_id": feedback_request.assignment_id,
                 "feedback": feedback,
+                "eval_type": feedback_request.eval_type,
+                "model_used": model_used,
                 "generated_at": feedback_request.completed_at.isoformat()
                 if feedback_request.completed_at
                 else datetime.now().isoformat(),
@@ -135,6 +139,24 @@ class FeedbackService:
             update_modified=True
         )
         frappe.db.commit()
+
+    def create_text_submission_feedback(self, language: str) -> Dict:
+        """Stock reply for text and emoji submissions, which are not graded."""
+        messages = {
+            "English": "Send me your completed activity champ! I am waiting to see what you have made",
+            "Hindi": "चैंप, मुझे अपनी पूरी की हुई एक्टिविटी भेजें! मैं यह देखने का इंतज़ार कर रही हूँ कि आपने क्या बनाया है।",
+            "Marathi": "चॅम्प, तुमची पूर्ण केलेली ॲक्टिव्हिटी मला पाठवा! तुम्ही काय बनवले आहे हे पाहण्यासाठी मी वाट पाहत आहे.",
+            "Punjabi": "ਚੈਂਪ, ਮੈਨੂੰ ਆਪਣੀ ਪੂਰੀ ਕੀਤੀ ਐਕਟੀਵਿਟੀ ਭੇਜੋ! ਮੈਂ ਇਹ ਦੇਖਣ ਦੀ ਉਡੀਕ ਕਰ ਰਹੀ ਹਾਂ ਕਿ ਤੁਸੀਂ ਕੀ ਬਣਾਇਆ ਹੈ।",
+            "Kannada": "ಚಾಂಪ್, ನಿಮ್ಮ ಪೂರ್ಣಗೊಳಿಸಿದ ಚಟುವಟಿಕೆಯನ್ನು ನನಗೆ ಕಳುಹಿಸಿ! ನೀವು ಏನು ಮಾಡಿದ್ದೀರಿ ಎಂದು ನೋಡಲು ನಾನು ಕಾಯುತ್ತಿದ್ದೇನೆ.",
+        }
+        return {
+            "overall_feedback": messages["English"],
+            "overall_feedback_translated": messages[language],
+            "translation_language": language,
+            "final_grade": 0,
+            "submission_validity": "Invalid",
+            "rubric_evaluations": [],
+        }
 
     def _create_ai_generated_feedback(self, plagiarism_data: Dict) -> Dict:
         """Create feedback for AI-generated submissions"""
@@ -290,6 +312,31 @@ class FeedbackService:
         
     #     return fallback
 
+    def fail_request(self, request_id: str, error: str, **fields) -> None:
+        """Mark a Feedback Request Failed and tell TAP LMS, so the submission doesn't wait forever."""
+        frappe.db.set_value(
+            "Feedback Request", request_id,
+            {"status": "Failed", "error_log": str(error)[:1000], **fields},
+        )
+        frappe.db.commit()
+        fr = frappe.get_doc("Feedback Request", request_id)
+        try:
+            self.queue_manager.send_feedback_to_tap({
+                "submission_id": fr.submission_id,
+                "student_id": fr.student_id,
+                "assignment_id": fr.assignment_id,
+                "eval_type": fr.eval_type,
+                "status": "Failed",
+                "feedback": self.create_error_feedback(str(error)),
+                "generated_at": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            # Don't stop the caller's loop over the rest of the batch.
+            frappe.log_error(
+                f"Could not send failure for {request_id} to TAP LMS: {e}",
+                "Feedback Failure Delivery Error",
+            )
+
     def create_error_feedback(self, error_msg: str) -> Dict:
         """Create feedback for system errors"""
 
@@ -302,6 +349,7 @@ class FeedbackService:
             "final_grade": 0,
             "submission_validity": "Valid" ,
             "encouragement": "Technical issues don't reflect your effort or ability.",
+            "error_message": error_msg,
             "rubric_evaluations": [{
                                         "Skill": "Content Knowledge",
                                         "grade_value": 2,
