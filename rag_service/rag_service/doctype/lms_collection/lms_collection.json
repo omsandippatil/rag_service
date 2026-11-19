@@ -1,0 +1,36 @@
+{
+ "actions": [],
+ "creation": "2026-11-17 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "connections"
+ ],
+ "fields": [
+  {
+   "description": "One row per LMS source. Submissions use the row whose LMS Source matches their source.",
+   "fieldname": "connections",
+   "fieldtype": "Table",
+   "label": "Connections",
+   "options": "LMS Connection"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-17 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Rag Service",
+ "name": "LMS Collection",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

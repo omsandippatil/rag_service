@@ -8,7 +8,7 @@ from typing import Dict, Optional
 from ..core.feedback_service import FeedbackService
 from ..core.assignment_context_manager import AssignmentContextManager
 from ..utils.queue_manager import QueueManager
-from ..utils.submission_data import build_submission_content, normalize_submission_payload
+from ..utils.submission_data import normalize_submission_payload
 from ..rag_service.doctype.kaapi_settings.kaapi_settings import assessments_enabled
 
 # Submission types that are DEFERRED to the nightly batch when batch mode is on.
@@ -29,7 +29,6 @@ class FeedbackHandler:
     def __init__(self):
         self.feedback_service = FeedbackService()
         self.queue_manager = QueueManager()
-        self.assignment_context_manager = AssignmentContextManager()
 
     async def handle_submission(self, message_data: Dict) -> None:
         """Handle a new submission from plagiarism queue"""
@@ -64,7 +63,7 @@ class FeedbackHandler:
             print(f"\nFeedback Request Created/Updated: {request_id}")
             
             # Get assignment context
-            assignment_context = await self.assignment_context_manager.get_assignment_context(
+            assignment_context = await AssignmentContextManager(message_data["source"]).get_assignment_context(
                 message_data["assignment_id"]
             )
             if message_data["language"] == "Hinglish":
@@ -129,10 +128,10 @@ class FeedbackHandler:
                 feedback_request.processing_attempts += 1
                 feedback_request.status = status
                 feedback_request.error_log = None  # Clear previous errors
+                feedback_request.source = message_data["source"]
                 feedback_request.submission_type = submission_data["submission_type"]
                 feedback_request.submission_url = submission_data["submission_url"]
                 feedback_request.submission_text = submission_data["submission_text"]
-                feedback_request.submission_content = build_submission_content(submission_data)
                 feedback_request.grade = message_data.get("grade")
                 feedback_request.level = message_data.get("level")
                 feedback_request.language = message_data.get("language")
@@ -145,6 +144,7 @@ class FeedbackHandler:
                     "submission_id": message_data["submission_id"],
                     "student_id": message_data["student_id"],
                     "assignment_id": message_data["assignment_id"],
+                    "source": message_data["source"],
                     "eval_type": message_data.get("eval_type") or "feedback",
                     "grade": message_data.get("grade"),
                     "level": message_data.get("level"),
@@ -152,7 +152,6 @@ class FeedbackHandler:
                     "submission_type": submission_data["submission_type"],
                     "submission_url": submission_data["submission_url"],
                     "submission_text": submission_data["submission_text"],
-                    "submission_content": build_submission_content(submission_data),
                     "plagiarism_score": message_data.get("plagiarism_score", 0.0),
                     "is_plagiarized": message_data.get("is_plagiarized", False),
                     "plagiarism_source": message_data.get("plagiarism_source", "none"),

@@ -76,9 +76,6 @@ class FeedbackService:
                 json.dumps(feedback, indent=2, ensure_ascii=False),
                 update_modified=True,
             )
-            feedback_request.db_set(
-                "feedback_summary", feedback.get("overall_feedback"), update_modified=True
-            )
             feedback_request.db_set("completed_at", datetime.now(), update_modified=True)
             feedback_request.db_set("model_used", model_used, update_modified=True)
             feedback_request.db_set("template_used", template_used, update_modified=True)

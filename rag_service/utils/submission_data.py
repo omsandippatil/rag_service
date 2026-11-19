@@ -34,13 +34,6 @@ def normalize_submission_payload(message_data: Dict) -> Dict:
     }
 
 
-def build_submission_content(submission_data: Dict) -> str:
-    submission_type = submission_data.get("submission_type")
-    if submission_type in MEDIA_SUBMISSION_TYPES:
-        return submission_data.get("submission_url") or ""
-    return submission_data.get("submission_text") or ""
-
-
 def format_submission_text_for_prompt(submission_data: Dict) -> str:
     submission_type = submission_data.get("submission_type")
     submission_text = submission_data.get("submission_text") or ""

@@ -86,7 +86,7 @@ async def _grade_request(fr_name: str) -> str:
     message_data = _message_from_request(fr)
     submission_data = normalize_submission_payload(message_data)
 
-    assignment_context = await AssignmentContextManager().get_assignment_context(fr.assignment_id)
+    assignment_context = await AssignmentContextManager(fr.source).get_assignment_context(fr.assignment_id)
     if not assignment_context:
         raise ValueError(f"No assignment context for assignment {fr.assignment_id}")
     assignment_context["student"] = {
@@ -197,7 +197,7 @@ async def _prepare_page(page: List[str]) -> Dict:
         # 2) render the prompt (the "before model call" half of the refactor)
         try:
             submission = normalize_submission_payload(message)
-            ctx = await AssignmentContextManager().get_assignment_context(fr.assignment_id)
+            ctx = await AssignmentContextManager(fr.source).get_assignment_context(fr.assignment_id)
             if not ctx:
                 raise ValueError(f"No assignment context for {fr.assignment_id}")
             ctx["student"] = {
@@ -212,7 +212,7 @@ async def _prepare_page(page: List[str]) -> Dict:
             }[kind](fs)
             req = gen.build_eval_request(ctx, submission, for_assessment=True)
             row = KaapiAssessmentClient.build_row(
-                fr_name, req["combined_prompt"], kind,
+                fr.submission_id, req["combined_prompt"], kind,
                 req.get("video_url") if kind == "video" else req.get("image_url"),
             )
         except Exception as e:
@@ -267,30 +267,34 @@ def run_submit_phase(page_size: int = 100, max_items: int = 0) -> Dict:
     client = KaapiAssessmentClient()
     summary = {"submitted": 0, "flagged": 0, "failed": 0, "pages": 0, "total": 0}
     started = datetime.now()
-    seen = set()
 
-    while True:
-        page = _fetch_pending(page_size)
-        fresh = [n for n in page if n not in seen]
-        if not fresh:
-            break
-        seen.update(fresh)
+    # Snapshot (no limit): rows that turn Pending during this run wait for the next one.
+    names = _fetch_pending(None)
+    if max_items:
+        names = names[:max_items]
+
+    # Prepare page by page, but collect buckets across all pages so each
+    # media/eval type is submitted together rather than once per page.
+    buckets: Dict = {}
+    for start in range(0, len(names), page_size):
+        page = names[start:start + page_size]
         summary["pages"] += 1
+        prepared = asyncio.run(_prepare_page(page))
+        summary["flagged"] += prepared["flagged"]
+        summary["failed"] += prepared["failed"]
+        for key, items in prepared["buckets"].items():
+            buckets.setdefault(key, []).extend(items)
+        summary["total"] += len(page)
+        frappe.logger().info(f"Nightly submit progress: {summary}")
 
-        buckets = asyncio.run(_prepare_page(fresh))
-        summary["flagged"] += buckets["flagged"]
-        summary["failed"] += buckets["failed"]
-        for (kind, eval_type), items in buckets["buckets"].items():
+    # Kaapi accepts at most 50 rows per request.
+    for (kind, eval_type), items in buckets.items():
+        for start in range(0, len(items), 50):
             try:
-                summary["submitted"] += _submit_bucket(client, kind, eval_type, items)
+                summary["submitted"] += _submit_bucket(client, kind, eval_type, items[start:start + 50])
             except Exception as e:
                 # Whole-batch submit failure: leave those rows Pending for the next run.
                 frappe.log_error(f"Kaapi submit failed ({kind}/{eval_type}): {e}", "Nightly Submit Error")
-        summary["total"] += len(fresh)
-
-        frappe.logger().info(f"Nightly submit progress: {summary}")
-        if max_items and summary["total"] >= max_items:
-            break
 
     summary["duration_s"] = round((datetime.now() - started).total_seconds(), 1)
     frappe.logger().info(f"Nightly submit complete: {summary}")

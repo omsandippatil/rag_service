@@ -8,9 +8,16 @@ from typing import Any, Dict
 from frappe.utils import now_datetime
 
 class AssignmentContextManager:
-    def __init__(self):
-        self.settings = frappe.get_single("RAG Settings")
-        
+    def __init__(self, source: str):
+        # Feedback Requests saved before `source` existed have none; they came from WhatsApp.
+        self.source = source or "whatsapp"
+        self.settings = next(
+            (row for row in frappe.get_single("LMS Collection").connections if row.lms_source == self.source),
+            None,
+        )
+        if not self.settings:
+            raise Exception(f"No LMS Connection configured for source '{self.source}'")
+
         # Construct headers with proper authentication
         self.headers = {
             "Content-Type": "application/json",
@@ -37,7 +44,8 @@ class AssignmentContextManager:
                 cached_context = frappe.get_list(
                     "Assignment Context",
                     filters={
-                        "name": assignment_id,
+                        "assignment_id": assignment_id,
+                        "source": self.source,
                         "update_time": [">", cache_updated_after]
                     },
                     fields=["name", "context"],
@@ -156,13 +164,12 @@ class AssignmentContextManager:
         try:
             update_time = now_datetime()
             payload = self._json_dumps(context)
-            existing = frappe.db.exists("Assignment Context", assignment_id)
-            
+            existing = frappe.db.exists("Assignment Context", {"assignment_id": assignment_id, "source": self.source})
+
             if existing:
                 # Update existing
                 doc = frappe.get_doc("Assignment Context", existing)
                 doc.update({
-                    "assignment_id": assignment_id,
                     "update_time": update_time,
                     "context": payload
                 })
@@ -172,8 +179,8 @@ class AssignmentContextManager:
                 # Create new
                 doc = frappe.get_doc({
                     "doctype": "Assignment Context",
-                    "name": assignment_id,
                     "assignment_id": assignment_id,
+                    "source": self.source,
                     "update_time": update_time,
                     "context": payload
                 })

@@ -6,38 +6,50 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "identity_section",
   "student_id",
+  "assignment_id",
+  "source",
+  "submission_id",
+  "identity_column",
   "grade",
   "level",
   "language",
-  "assignment_id",
-  "submission_id",
   "eval_type",
+  "submission_section",
   "submission_type",
+  "submission_column",
   "submission_url",
   "submission_text",
-  "submission_content",
-  "plagiarism_score",
-  "similar_sources",
+  "status_section",
   "status",
-  "generated_feedback",
-  "feedback_summary",
+  "result_status",
+  "is_archived",
+  "status_column",
   "created_at",
   "completed_at",
-  "template_used",
-  "model_used",
   "processing_attempts",
-  "error_log",
-  "is_archived",
-  "result_status",
+  "feedback_section",
+  "generated_feedback",
+  "detection_section",
+  "plagiarism_score",
   "is_plagiarized",
   "match_type",
   "plagiarism_source",
+  "similar_sources",
+  "detection_column",
   "is_ai_generated",
   "ai_detection_source",
   "ai_confidence",
+  "processing_section",
+  "template_used",
+  "model_used",
+  "processing_column",
+  "error_log",
+  "kaapi_section",
   "kaapi_assessment_id",
   "kaapi_batch_index",
+  "kaapi_column",
   "kaapi_status",
   "kaapi_context"
  ],
@@ -53,8 +65,16 @@
    "label": "Assignment ID"
   },
   {
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "whatsapp\ntapapp",
+   "reqd": 1
+  },
+  {
    "fieldname": "submission_id",
    "fieldtype": "Data",
+   "in_standard_filter": 1,
    "label": "Submission ID"
   },
   {
@@ -74,11 +94,6 @@
    "label": "Submission Text"
   },
   {
-   "fieldname": "submission_content",
-   "fieldtype": "Text",
-   "label": "Submission Content"
-  },
-  {
    "fieldname": "plagiarism_score",
    "fieldtype": "Float",
    "label": "Plagiarism Score"
@@ -91,6 +106,7 @@
   {
    "fieldname": "status",
    "fieldtype": "Select",
+   "in_standard_filter": 1,
    "label": "Status",
    "options": "Pending\nProcessing\nCompleted\nFailed"
   },
@@ -98,11 +114,6 @@
    "fieldname": "generated_feedback",
    "fieldtype": "Text",
    "label": "Generated Feedback"
-  },
-  {
-   "fieldname": "feedback_summary",
-   "fieldtype": "Text",
-   "label": "Feedback Summary"
   },
   {
    "fieldname": "created_at",
@@ -147,7 +158,6 @@
    "options": "Pending\nSuccess - Original\nSuccess - Flagged\nFailed",
    "default": "Pending",
    "in_list_view": 1,
-   "in_standard_filter": 1,
    "description": "Overall feedback generation result status"
   },
   {
@@ -214,6 +224,7 @@
    "fieldname": "kaapi_status",
    "fieldtype": "Select",
    "label": "Kaapi Status",
+   "in_standard_filter": 1,
    "options": "\nSubmitted\nCompleted\nFailed",
    "description": "Lifecycle of the Kaapi ASSESSMENT submission for this row"
   },
@@ -229,11 +240,70 @@
    "fieldtype": "Select",
    "label": "Eval Type",
    "options": "feedback\nrubric"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Student & Assignment"
+  },
+  {
+   "fieldname": "identity_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "submission_section",
+   "fieldtype": "Section Break",
+   "label": "Submission"
+  },
+  {
+   "fieldname": "submission_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "status_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "feedback_section",
+   "fieldtype": "Section Break",
+   "label": "Feedback"
+  },
+  {
+   "fieldname": "detection_section",
+   "fieldtype": "Section Break",
+   "label": "Plagiarism & AI Detection"
+  },
+  {
+   "fieldname": "detection_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "processing_section",
+   "fieldtype": "Section Break",
+   "label": "Processing"
+  },
+  {
+   "fieldname": "processing_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "kaapi_section",
+   "fieldtype": "Section Break",
+   "label": "Kaapi"
+  },
+  {
+   "fieldname": "kaapi_column",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-01 12:00:00.000000",
+ "modified": "2026-11-17 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Rag Service",
  "name": "Feedback Request",
