@@ -53,7 +53,11 @@ class FeedbackHandler:
             request_id = await self.create_feedback_request(
                 message_data, submission_data, status="Pending"
             )
-            print(f"\nDeferred {submission_type} submission to nightly batch: {request_id}")
+            if message_data["source"] == "tapapp" and assessments_enabled():
+                # tapapp doesn't wait for the scheduled run: submit this one row to Kaapi now.
+                frappe.enqueue("rag_service.core.batch_runner.run_submit_phase", names=[request_id])
+            else:
+                print(f"\nDeferred {submission_type} submission to nightly batch: {request_id}")
             return
 
         request_id = None

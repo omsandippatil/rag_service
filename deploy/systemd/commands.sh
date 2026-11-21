@@ -8,3 +8,5 @@ sudo systemctl restart rag-service-consumer.service
 journalctl -u rag-service-consumer.service -f
 
 sudo systemctl stop rag-service-consumer.service
+
+journalctl -u rag-service-consumer.service --no-pager | grep -C 20 "i5lh89e8q9"
