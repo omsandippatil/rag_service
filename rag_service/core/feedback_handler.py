@@ -12,7 +12,8 @@ from ..utils.submission_data import normalize_submission_payload
 from ..rag_service.doctype.kaapi_settings.kaapi_settings import assessments_enabled
 
 # Submission types that are DEFERRED to the nightly batch when batch mode is on.
-# All media types (including audio) are now graded through the nightly Kaapi batch.
+# Audio is now graded through Kaapi batch assessment too (see audio_evaluation.py),
+# so it's deferred like image/text/video instead of always processing in real time.
 DEFERRED_SUBMISSION_TYPES = {"image", "text", "emoji", "video", "audio"}
 
 
@@ -47,13 +48,17 @@ class FeedbackHandler:
             )
             return
 
-        # Batch mode: image/text/video/audio are DEFERRED — save a Pending record and
-        # stop (the nightly batch grades them).
+        # Batch mode: image/text/video/audio are DEFERRED — save a Pending record and stop
+        # (the nightly batch grades them).
         if batch_mode_enabled() and submission_type in DEFERRED_SUBMISSION_TYPES:
             request_id = await self.create_feedback_request(
                 message_data, submission_data, status="Pending"
             )
-            print(f"\nDeferred {submission_type} submission to nightly batch: {request_id}")
+            if message_data["source"] == "tapapp" and assessments_enabled():
+                # tapapp doesn't wait for the scheduled run: submit this one row to Kaapi now.
+                frappe.enqueue("rag_service.core.batch_runner.run_submit_phase", names=[request_id])
+            else:
+                print(f"\nDeferred {submission_type} submission to nightly batch: {request_id}")
             return
 
         request_id = None
