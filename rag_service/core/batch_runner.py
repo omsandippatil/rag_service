@@ -4,11 +4,14 @@ Nightly batch grader.
 
 Flow: image/text/video/audio submissions are NOT graded in real time —
 `FeedbackHandler.handle_submission` saves them to the Feedback Request doctype with
-status="Pending" (see `feedback_handler.batch_mode_enabled`). This job grades all
-Pending rows overnight, IN PARALLEL, through the exact same stages as the real-time
-path — plagiarism gate -> Kaapi grading -> feedback -> and then delivers each result,
-one by one, to the outbound `feedback_results_queue` (via `FeedbackService.process_feedback`)
-so the LMS picks it up.
+status="Pending" (see `feedback_handler.batch_mode_enabled`). tapapp rows are submitted
+to Kaapi immediately instead (see feedback_handler's fast-path), so this job's normal
+fetch excludes them — they're not picked up by the scheduled run, only explicitly named.
+
+This job grades all Pending image/text/video/audio rows overnight, IN PARALLEL, through
+the exact same stages as the real-time path — plagiarism gate -> Kaapi grading -> feedback
+-> and then delivers each result, one by one, to the outbound `feedback_results_queue`
+(via `FeedbackService.process_feedback`) so the LMS picks it up.
 
 Parallelism uses threads (the Kaapi HTTP calls are blocking `requests`), and EACH worker
 thread gets its own Frappe connection — the safe way to parallelize Frappe work.
@@ -130,7 +133,8 @@ def _grade_in_thread(site: str, fr_name: str) -> str:
 def _fetch_pending(page_size: int) -> List[str]:
     return frappe.get_list(
         "Feedback Request",
-        filters={"status": "Pending", "submission_type": ["in", DEFERRED_SUBMISSION_TYPES]},
+        # tapapp rows are submitted right away (see feedback_handler), never by the scheduled run.
+        filters={"status": "Pending", "source": "whatsapp", "submission_type": ["in", DEFERRED_SUBMISSION_TYPES]},
         order_by="created_at asc",
         limit=page_size,
         pluck="name",
@@ -265,9 +269,9 @@ def _submit_bucket(client, kind: str, eval_type: str, items: List) -> int:
     return len(items)
 
 
-def run_submit_phase(page_size: int = 100, max_items: int = 0) -> Dict:
-    """Phase 1: render all Pending image/text/video/audio rows and submit them to Kaapi
-    in batches. Completion arrives later via the webhook (see api/kaapi_webhook.py).
+def run_submit_phase(page_size: int = 100, max_items: int = 0, names: List[str] = None) -> Dict:
+    """Phase 1: render all Pending image/text/video/audio rows (or only `names`) and submit
+    them to Kaapi in batches. Completion arrives later via the webhook (see api/kaapi_webhook.py).
     Flagged rows are delivered canned inline. Resumable: submitted rows leave the Pending set."""
     from .kaapi_assessment import KaapiAssessmentClient
 
@@ -275,8 +279,11 @@ def run_submit_phase(page_size: int = 100, max_items: int = 0) -> Dict:
     summary = {"submitted": 0, "flagged": 0, "failed": 0, "pages": 0, "total": 0}
     started = datetime.now()
 
-    # Snapshot (no limit): rows that turn Pending during this run wait for the next one.
-    names = _fetch_pending(None)
+    # Explicitly named rows (tapapp) are not picked by any later run, so they can't wait for a retry.
+    retry_later = names is None
+    if retry_later:
+        # Snapshot (no limit): rows that turn Pending during this run wait for the next one.
+        names = _fetch_pending(None)
     if max_items:
         names = names[:max_items]
 
@@ -297,11 +304,15 @@ def run_submit_phase(page_size: int = 100, max_items: int = 0) -> Dict:
     # Kaapi accepts at most 50 rows per request.
     for (kind, eval_type), items in buckets.items():
         for start in range(0, len(items), 50):
+            chunk = items[start:start + 50]
             try:
-                summary["submitted"] += _submit_bucket(client, kind, eval_type, items[start:start + 50])
+                summary["submitted"] += _submit_bucket(client, kind, eval_type, chunk)
             except Exception as e:
                 # Whole-batch submit failure: leave those rows Pending for the next run.
                 frappe.log_error(f"Kaapi submit failed ({kind}/{eval_type}): {e}", "Nightly Submit Error")
+                if not retry_later:
+                    for fr_name, _row, _ctx in chunk:
+                        _mark_failed(fr_name, f"Kaapi submit failed: {e}")
 
     summary["duration_s"] = round((datetime.now() - started).total_seconds(), 1)
     frappe.logger().info(f"Nightly submit complete: {summary}")
